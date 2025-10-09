@@ -1,8 +1,6 @@
 import json
-import os
 from datetime import datetime
 from pathlib import Path
-
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,15 +15,15 @@ def scrape_margin_rates():
     try:
         response = requests.get(IBKR_MARGIN_URL, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+        soup = BeautifulSoup(response.content, "html.parser")
 
         rates = {}
-        table = soup.find('table')
+        table = soup.find("table")
         if not table:
             return None
 
-        for row in table.find_all('tr'):
-            cells = [cell.get_text(strip=True) for cell in row.find_all(['td', 'th'])]
+        for row in table.find_all("tr"):
+            cells = [cell.get_text(strip=True) for cell in row.find_all(["td", "th"])]
             if len(cells) < 3:
                 continue
 
@@ -33,12 +31,12 @@ def scrape_margin_rates():
             currency = cells[0]
             tier = cells[1]
 
-            if currency in ['USD', 'CAD'] and tier.startswith('0') and '≤' in tier:
+            if currency in ["USD", "CAD"] and tier.startswith("0") and "≤" in tier:
                 # Find the rate (has % symbol)
                 for cell in cells:
-                    if '%' in cell and any(char.isdigit() for char in cell):
+                    if "%" in cell and any(char.isdigit() for char in cell):
                         # Extract the rate, removing parenthetical info
-                        rate = cell.split('(')[0].strip()
+                        rate = cell.split("(")[0].strip()
                         rates[currency] = rate
                         break
 
@@ -55,11 +53,11 @@ def load_previous_rates():
         return None
 
     try:
-        with open(HISTORY_FILE, 'r') as f:
+        with open(HISTORY_FILE) as f:
             lines = f.readlines()
             if lines:
                 return json.loads(lines[-1].strip())
-    except (json.JSONDecodeError, IOError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"Error reading previous rates: {e}")
 
     return None
@@ -68,24 +66,24 @@ def load_previous_rates():
 def save_rates(rates):
     """Save current rates to file with timestamp."""
     data = {
-        'timestamp': datetime.now().isoformat(),
-        'rates': rates
+        "timestamp": datetime.now().isoformat(),
+        "rates": rates,
     }
 
     try:
         # Append to history (JSON Lines format)
-        with open(HISTORY_FILE, 'a') as f:
-            f.write(json.dumps(data) + '\n')
-    except IOError as e:
+        with open(HISTORY_FILE, "a") as f:
+            f.write(json.dumps(data) + "\n")
+    except OSError as e:
         print(f"Error saving rates: {e}")
 
 
 def check_for_changes(current_rates, previous_data):
     """Compare current rates with previous rates and return change status."""
-    if not previous_data or 'rates' not in previous_data:
+    if not previous_data or "rates" not in previous_data:
         return True, "First run - no previous data"
 
-    previous_rates = previous_data['rates']
+    previous_rates = previous_data["rates"]
     changes = []
 
     for currency in current_rates:
