@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 # Configuration
 IBKR_MARGIN_URL = "https://www.interactivebrokers.ca/en/trading/margin-rates.php"
-DATA_FILE = Path(__file__).parent / "margin_rates_data.json"
+HISTORY_FILE = Path(__file__).parent / "margin_rates_history.jsonl"
 
 
 def scrape_margin_rates():
@@ -51,15 +51,18 @@ def scrape_margin_rates():
 
 def load_previous_rates():
     """Load previously stored margin rates from file."""
-    if not DATA_FILE.exists():
+    if not HISTORY_FILE.exists():
         return None
 
     try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
+        with open(HISTORY_FILE, 'r') as f:
+            lines = f.readlines()
+            if lines:
+                return json.loads(lines[-1].strip())
     except (json.JSONDecodeError, IOError) as e:
         print(f"Error reading previous rates: {e}")
-        return None
+
+    return None
 
 
 def save_rates(rates):
@@ -70,8 +73,9 @@ def save_rates(rates):
     }
 
     try:
-        with open(DATA_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
+        # Append to history (JSON Lines format)
+        with open(HISTORY_FILE, 'a') as f:
+            f.write(json.dumps(data) + '\n')
     except IOError as e:
         print(f"Error saving rates: {e}")
 
