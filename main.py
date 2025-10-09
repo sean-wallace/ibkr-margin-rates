@@ -3,12 +3,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-try:
-    import requests
-    from bs4 import BeautifulSoup
-except ImportError:
-    print("Required packages not installed. Run: pip install requests beautifulsoup4")
-    exit(1)
+
+import requests
+from bs4 import BeautifulSoup
 
 # Configuration
 IBKR_MARGIN_URL = "https://www.interactivebrokers.ca/en/trading/margin-rates.php"
@@ -20,60 +17,34 @@ def scrape_margin_rates():
     try:
         response = requests.get(IBKR_MARGIN_URL, timeout=10)
         response.raise_for_status()
-
         soup = BeautifulSoup(response.content, 'html.parser')
 
         rates = {}
-
-        # Find the margin rates table
-        tables = soup.find_all('table')
-
-        if not tables:
-            print("Error: No tables found on page")
+        table = soup.find('table')
+        if not table:
             return None
 
-        # Parse the main table (usually the first one)
-        table = tables[0]
-        rows = table.find_all('tr')
-
-        current_currency = None
-
-        for row in rows:
-            cells = row.find_all(['td', 'th'])
-            if not cells:
+        for row in table.find_all('tr'):
+            cells = [cell.get_text(strip=True) for cell in row.find_all(['td', 'th'])]
+            if len(cells) < 3:
                 continue
 
-            # Get text from all cells
-            cell_texts = [cell.get_text(strip=True) for cell in cells]
+            # Look for rows with: Currency, tier starting with 0, and a percentage rate
+            currency = cells[0]
+            tier = cells[1]
 
-            # Check if this row indicates a currency
-            if len(cell_texts) > 0 and cell_texts[0] in ['USD', 'CAD', 'EUR', 'GBP', 'CHF', 'AUD', 'JPY', 'HKD', 'SEK', 'NOK', 'DKK', 'SGD']:
-                current_currency = cell_texts[0]
+            if currency in ['USD', 'CAD'] and tier.startswith('0') and '≤' in tier:
+                # Find the rate (has % symbol)
+                for cell in cells:
+                    if '%' in cell and any(char.isdigit() for char in cell):
+                        # Extract the rate, removing parenthetical info
+                        rate = cell.split('(')[0].strip()
+                        rates[currency] = rate
+                        break
 
-            # Check if this is a base tier row (tier 0)
-            if current_currency and len(cell_texts) >= 3:
-                tier_text = cell_texts[0] if cell_texts[0] != current_currency else (cell_texts[1] if len(cell_texts) > 1 else '')
+        return rates if rates else None
 
-                # Look for tier 0 (base tier) - starts with "0" or is empty after currency
-                if tier_text.startswith('0') or (current_currency in ['USD', 'CAD'] and '≤' in ' '.join(cell_texts)):
-                    # Find the rate (usually has % sign)
-                    for cell_text in cell_texts:
-                        if '%' in cell_text:
-                            # Extract just the percentage rate
-                            rate = cell_text.split('%')[0].split('(')[0].strip() + '%'
-                            if current_currency in ['USD', 'CAD']:
-                                rates[current_currency] = rate
-                            # Reset currency after finding base tier
-                            current_currency = None
-                            break
-
-        if not rates:
-            print("Warning: Could not find margin rates on page. Page structure may have changed.")
-            return None
-
-        return rates
-
-    except requests.RequestException as e:
+    except Exception as e:
         print(f"Error fetching margin rates: {e}")
         return None
 
@@ -126,21 +97,12 @@ def check_for_changes(current_rates, previous_data):
 
 
 def main():
-    print("=" * 60)
-    print("Interactive Brokers Margin Rate Checker")
-    print("=" * 60)
-    print()
-
     # Scrape current rates
-    print("Fetching current margin rates...")
     current_rates = scrape_margin_rates()
 
     if not current_rates:
         print("Failed to retrieve margin rates. Exiting.")
         return
-
-    print(f"✓ Successfully retrieved rates")
-    print()
 
     # Load previous rates
     previous_data = load_previous_rates()
@@ -172,8 +134,6 @@ def main():
 
     # Save current rates
     save_rates(current_rates)
-    print(f"✓ Rates saved to {DATA_FILE}")
-    print()
 
 
 if __name__ == "__main__":
