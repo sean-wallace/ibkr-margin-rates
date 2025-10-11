@@ -129,8 +129,8 @@ def main():
             print(f"  {change_info}")
     else:
         print("✓ No changes since last check")
-        if previous_data:
-            print(f"  Last checked: {previous_data.get('timestamp', 'Unknown')}")
+    if previous_data:
+        print(f"  Last checked: {previous_data.get('timestamp', 'Unknown')}")
 
     print()
 
