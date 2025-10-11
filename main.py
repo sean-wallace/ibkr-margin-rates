@@ -78,6 +78,47 @@ def save_rates(rates):
         print(f"Error saving rates: {e}")
 
 
+def prune_history():
+    """Keep only one entry per day (the latest) in the history file."""
+    if not HISTORY_FILE.exists():
+        return
+
+    try:
+        # Read all entries
+        with open(HISTORY_FILE) as f:
+            lines = f.readlines()
+
+        if not lines:
+            return
+
+        # Group entries by date, keeping the latest for each day
+        entries_by_date = {}
+        for line in lines:
+            try:
+                data = json.loads(line.strip())
+                timestamp = datetime.fromisoformat(data["timestamp"])
+                date_key = timestamp.date().isoformat()
+
+                # Keep only if this is the first entry for this date or if it's later
+                if date_key not in entries_by_date:
+                    entries_by_date[date_key] = (timestamp, data)
+                else:
+                    existing_timestamp, _ = entries_by_date[date_key]
+                    if timestamp > existing_timestamp:
+                        entries_by_date[date_key] = (timestamp, data)
+            except (json.JSONDecodeError, KeyError, ValueError):
+                continue
+
+        # Write back only the latest entry for each day, sorted by date
+        with open(HISTORY_FILE, "w") as f:
+            for date_key in sorted(entries_by_date.keys()):
+                _, data = entries_by_date[date_key]
+                f.write(json.dumps(data) + "\n")
+
+    except OSError as e:
+        print(f"Error pruning history: {e}")
+
+
 def check_for_changes(current_rates, previous_data):
     """Compare current rates with previous rates and return change status."""
     if not previous_data or "rates" not in previous_data:
@@ -136,6 +177,9 @@ def main():
 
     # Save current rates
     save_rates(current_rates)
+
+    # Prune history to keep only one entry per day
+    prune_history()
 
 
 if __name__ == "__main__":
