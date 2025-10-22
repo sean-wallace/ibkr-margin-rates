@@ -1,7 +1,8 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
+import asciichartpy
 import requests
 from bs4 import BeautifulSoup
 
@@ -139,6 +140,87 @@ def check_for_changes(current_rates, previous_data):
     return False, "No changes detected"
 
 
+def generate_rate_chart():
+    """Generate ASCII chart of historical margin rates with interpolated missing days."""
+    if not HISTORY_FILE.exists():
+        return
+
+    try:
+        with open(HISTORY_FILE) as f:
+            lines = f.readlines()
+
+        if len(lines) < 2:
+            print("Not enough historical data to generate chart.")
+            return
+
+        # Parse historical data
+        raw_data = []
+        for line in lines:
+            try:
+                data = json.loads(line.strip())
+                rates = data["rates"]
+                timestamp = datetime.fromisoformat(data["timestamp"])
+
+                usd_rate = float(rates["USD"].rstrip("%")) if "USD" in rates else None
+                cad_rate = float(rates["CAD"].rstrip("%")) if "CAD" in rates else None
+
+                raw_data.append({"date": timestamp.date(), "usd": usd_rate, "cad": cad_rate})
+            except (json.JSONDecodeError, KeyError, ValueError):
+                continue
+
+        if not raw_data:
+            return
+
+        # Fill in missing dates with interpolated values
+        start_date = raw_data[0]["date"]
+        end_date = raw_data[-1]["date"]
+        actual_dates = {entry["date"] for entry in raw_data}
+        date_map = {entry["date"]: entry for entry in raw_data}
+
+        # Build complete series with interpolated values
+        usd_series = []
+        cad_series = []
+        dates = []
+        last_usd = None
+        last_cad = None
+        current_date = start_date
+
+        while current_date <= end_date:
+            dates.append(current_date.strftime("%Y-%m-%d"))
+
+            if current_date in actual_dates:
+                entry = date_map[current_date]
+                last_usd = entry["usd"]
+                last_cad = entry["cad"]
+
+            usd_series.append(last_usd)
+            cad_series.append(last_cad)
+            current_date += timedelta(days=1)
+
+        print("\nHistorical Margin Rates:")
+        print("=" * 60)
+
+        # Generate chart
+        has_usd = any(x is not None for x in usd_series)
+        has_cad = any(x is not None for x in cad_series)
+
+        if has_usd and has_cad:
+            print(f"\nMargin Rates ({dates[0]} to {dates[-1]}, {len(dates)} days):")
+
+            config = {"height": 10, "colors": [asciichartpy.blue, asciichartpy.red], "format": "{:8.3f}%"}
+            print(asciichartpy.plot([usd_series, cad_series], config))
+
+            usd_vals = [x for x in usd_series if x is not None]
+            cad_vals = [x for x in cad_series if x is not None]
+
+            print(f"  USD (blue):  Current: {usd_series[-1]}% | Min: {min(usd_vals)}% | Max: {max(usd_vals)}%")
+            print(f"  CAD (red):   Current: {cad_series[-1]}% | Min: {min(cad_vals)}% | Max: {max(cad_vals)}%")
+            print(f"  ({len(actual_dates)} actual data points, {len(dates) - len(actual_dates)} interpolated)")
+
+    except OSError as e:
+        print(f"Error generating chart: {e}")
+
+
 def main():
     # Scrape current rates
     current_rates = scrape_margin_rates()
@@ -180,6 +262,9 @@ def main():
 
     # Prune history to keep only one entry per day
     prune_history()
+
+    # Generate ASCII chart of historical rates
+    generate_rate_chart()
 
 
 if __name__ == "__main__":
