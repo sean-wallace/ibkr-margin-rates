@@ -22,15 +22,28 @@
         .cad { color: #b05040; }
         footer { text-align: center; font-size: .75rem; color: #bbb; margin-top: 1.5rem; }
         footer a { color: #bbb; }
+
+        /* Calculator */
+        .calc-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+        .calc-table th { text-align: right; padding: .4rem .6rem; color: #999; font-weight: 500; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+        .calc-table th:first-child { text-align: left; }
+        .calc-table td { padding: .4rem .6rem; text-align: right; border-top: 1px solid #f0f0f0; vertical-align: middle; }
+        .calc-table td:first-child { text-align: left; color: #555; }
+        .calc-table .total-row td { border-top: 2px solid #eee; font-weight: 600; color: #222; }
+        .calc-table .savings-row td { border-top: 1px dashed #e0e0e0; font-size: .8rem; color: #6a9a6a; padding-top: .5rem; padding-bottom: .5rem; }
+        .input-wrap { display: flex; align-items: center; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; width: fit-content; }
+        .input-wrap span { padding: .35rem .5rem; background: #f5f5f5; color: #888; font-size: .85rem; border-right: 1px solid #ddd; }
+        .input-wrap input { border: none; outline: none; padding: .35rem .5rem; font-size: .9rem; width: 6.5rem; font-family: inherit; }
+        .total-select { font-size: .8rem; border: 1px solid #ddd; border-radius: 4px; padding: .15rem .25rem; font-family: inherit; color: #555; background: #fff; cursor: pointer; }
+        .fx-rate { font-size: .75rem; color: #aaa; }
+        .disclaimer { margin-top: 1rem; font-size: .8rem; color: #a07840; background: #fdf6ec; border: 1px solid #f0ddb8; border-radius: 6px; padding: .65rem .85rem; }
+        .disclaimer a { color: #a07840; }
     </style>
 </head>
 <body>
 <div class="wrap">
     <h1>IBKR Margin Rates</h1>
     <p class="sub" id="subtitle"></p>
-    <div class="card">
-        <canvas id="chart"></canvas>
-    </div>
     <div class="stats">
         <div class="card stat">
             <div class="lbl">USD</div>
@@ -43,6 +56,62 @@
             <div class="range" id="cad-range"></div>
         </div>
     </div>
+    <div class="card">
+        <canvas id="chart"></canvas>
+    </div>
+
+    <div class="card">
+        <table class="calc-table">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Rate</th>
+                    <th style="text-align:left">Debit Balance</th>
+                    <th>Daily</th>
+                    <th>Monthly</th>
+                    <th>Annual</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>USD</td>
+                    <td id="usd-rate-note"></td>
+                    <td><div class="input-wrap"><span>$</span><input type="text" inputmode="numeric" id="usd-balance" placeholder="0"></div></td>
+                    <td id="usd-daily">—</td>
+                    <td id="usd-monthly">—</td>
+                    <td id="usd-annual">—</td>
+                </tr>
+                <tr>
+                    <td>CAD</td>
+                    <td id="cad-rate-note"></td>
+                    <td><div class="input-wrap"><span>$</span><input type="text" inputmode="numeric" id="cad-balance" placeholder="0"></div></td>
+                    <td id="cad-daily">—</td>
+                    <td id="cad-monthly">—</td>
+                    <td id="cad-annual">—</td>
+                </tr>
+                <tr class="total-row">
+                    <td>Total in <select class="total-select" id="total-currency"><option value="USD">USD</option><option value="CAD" selected>CAD</option></select></td>
+                    <td><span class="fx-rate" id="fx-rate">loading…</span></td>
+                    <td><div class="input-wrap"><span>$</span><input type="text" id="total-balance" disabled value="—"></div></td>
+                    <td id="total-daily">—</td>
+                    <td id="total-monthly">—</td>
+                    <td id="total-annual">—</td>
+                </tr>
+                <tr class="savings-row" id="savings-row" hidden>
+                    <td id="savings-label" style="color:#777;font-style:italic"></td>
+                    <td></td>
+                    <td></td>
+                    <td id="savings-daily"></td>
+                    <td id="savings-monthly"></td>
+                    <td id="savings-annual"></td>
+                </tr>
+            </tbody>
+        </table>
+        <p class="disclaimer" id="disclaimer" hidden>
+            Balances above $100,000 USD or $130,000 CAD fall into higher tiers with lower rates — this calculator only applies the first-tier rate and will overstate your actual interest cost. <a href="https://www.interactivebrokers.ca/en/trading/margin-rates.php">See full rate schedule.</a>
+        </p>
+    </div>
+
     <footer>Rates last changed <span id="last-updated"></span> &middot; <a href="https://www.interactivebrokers.ca/en/trading/margin-rates.php">Source: IBKR</a></footer>
 </div>
 
@@ -54,12 +123,34 @@ __RATE_DATA__
 const d = JSON.parse(document.getElementById('rate-data').textContent);
 const m = d.meta;
 
-document.getElementById('subtitle').textContent    = m.date_range + ' · ' + m.n_points + ' observations';
-document.getElementById('usd-current').textContent = m.usd_current + '%';
-document.getElementById('usd-range').textContent   = 'Min ' + m.usd_min + '% · Max ' + m.usd_max + '%';
-document.getElementById('cad-current').textContent = m.cad_current + '%';
-document.getElementById('cad-range').textContent   = 'Min ' + m.cad_min + '% · Max ' + m.cad_max + '%';
+// 90-day min/max
+const cutoff = new Date();
+cutoff.setDate(cutoff.getDate() - 90);
+const recent = d.labels.reduce(function(acc, label, i) {
+    if (new Date(label) >= cutoff) {
+        if (d.usd[i] !== null) acc.usd.push(d.usd[i]);
+        if (d.cad[i] !== null) acc.cad.push(d.cad[i]);
+    }
+    return acc;
+}, { usd: [], cad: [] });
+
+function r90(arr, fn) { return arr.length ? fn.apply(null, arr).toFixed(3) : null; }
+const usd90min = r90(recent.usd, Math.min), usd90max = r90(recent.usd, Math.max);
+const cad90min = r90(recent.cad, Math.min), cad90max = r90(recent.cad, Math.max);
+
+document.getElementById('subtitle').textContent     = m.date_range + ' · ' + m.n_points + ' observations';
+document.getElementById('usd-current').textContent  = m.usd_current + '%';
+document.getElementById('cad-current').textContent  = m.cad_current + '%';
 document.getElementById('last-updated').textContent = m.last_updated;
+document.getElementById('usd-rate-note').textContent = '@ ' + m.usd_current + '%';
+document.getElementById('cad-rate-note').textContent = '@ ' + m.cad_current + '%';
+
+document.getElementById('usd-range').textContent = usd90min
+    ? '90d: ' + usd90min + '–' + usd90max + '%'
+    : 'Min ' + m.usd_min + '% – Max ' + m.usd_max + '%';
+document.getElementById('cad-range').textContent = cad90min
+    ? '90d: ' + cad90min + '–' + cad90max + '%'
+    : 'Min ' + m.cad_min + '% – Max ' + m.cad_max + '%';
 
 new Chart(document.getElementById('chart'), {
     type: 'line',
@@ -97,11 +188,32 @@ new Chart(document.getElementById('chart'), {
             x: {
                 type: 'time',
                 time: {
+                    unit: 'month',
                     tooltipFormat: 'MMM d, yyyy',
-                    displayFormats: { month: 'MMM yyyy', day: 'MMM d' },
                 },
-                grid: { display: false },
-                ticks: { maxTicksLimit: 8 },
+                grid: {
+                    display: true,
+                    color: function(ctx) {
+                        return new Date(ctx.tick.value).getMonth() === 0
+                            ? 'rgba(0,0,0,.18)'
+                            : 'rgba(0,0,0,.06)';
+                    },
+                    lineWidth: function(ctx) {
+                        return new Date(ctx.tick.value).getMonth() === 0 ? 1.5 : 1;
+                    },
+                    borderDash: [3, 3],
+                },
+                ticks: {
+                    maxTicksLimit: 20,
+                    callback: function(value, index) {
+                        const date = new Date(value);
+                        const month = date.toLocaleString('en', { month: 'short' });
+                        if (date.getMonth() === 0 || index === 0) {
+                            return [month, String(date.getFullYear())];
+                        }
+                        return month;
+                    },
+                },
             },
             y: {
                 ticks: { callback: function(v) { return v.toFixed(2) + '%'; } },
@@ -118,6 +230,131 @@ new Chart(document.getElementById('chart'), {
         },
     },
 });
+
+// Calculator
+const USD_TIER1 = 100000;
+const CAD_TIER1 = 130000;
+
+let usdToCad = null;
+
+function fmt(n) {
+    return '$' + n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtBal(n) {
+    return '$' + Math.round(n).toLocaleString('en-CA');
+}
+
+function parseBalance(val) {
+    return parseFloat(val.replace(/,/g, '')) || 0;
+}
+
+function formatInput(input) {
+    const cursor = input.selectionStart;
+    const oldLen = input.value.length;
+    const digits = input.value.replace(/[^\d]/g, '');
+    if (!digits) { input.value = ''; return; }
+    const formatted = parseInt(digits, 10).toLocaleString('en-CA');
+    input.value = formatted;
+    const newCursor = Math.max(0, cursor + formatted.length - oldLen);
+    input.setSelectionRange(newCursor, newCursor);
+}
+
+function updateCalc() {
+    const usdBal  = parseBalance(document.getElementById('usd-balance').value);
+    const cadBal  = parseBalance(document.getElementById('cad-balance').value);
+    const usdRate = parseFloat(m.usd_current) / 100;
+    const cadRate = parseFloat(m.cad_current) / 100;
+    const totalCurrency = document.getElementById('total-currency').value;
+
+    const usd = { daily: usdBal * usdRate / 365, monthly: usdBal * usdRate / 12, annual: usdBal * usdRate };
+    const cad = { daily: cadBal * cadRate / 365, monthly: cadBal * cadRate / 12, annual: cadBal * cadRate };
+
+    document.getElementById('usd-daily').textContent   = usdBal ? fmt(usd.daily)   : '—';
+    document.getElementById('usd-monthly').textContent = usdBal ? fmt(usd.monthly) : '—';
+    document.getElementById('usd-annual').textContent  = usdBal ? fmt(usd.annual)  : '—';
+
+    document.getElementById('cad-daily').textContent   = cadBal ? fmt(cad.daily)   : '—';
+    document.getElementById('cad-monthly').textContent = cadBal ? fmt(cad.monthly) : '—';
+    document.getElementById('cad-annual').textContent  = cadBal ? fmt(cad.annual)  : '—';
+
+    const hasAny = usdBal || cadBal;
+    const usdFactor = totalCurrency === 'USD' ? 1 : usdToCad;
+    const cadFactor = totalCurrency === 'CAD' ? 1 : 1 / usdToCad;
+
+    if (hasAny && usdToCad) {
+        document.getElementById('total-balance').value        = Math.round(usdBal * usdFactor + cadBal * cadFactor).toLocaleString('en-CA');
+        document.getElementById('total-daily').textContent   = fmt(usd.daily   * usdFactor + cad.daily   * cadFactor);
+        document.getElementById('total-monthly').textContent = fmt(usd.monthly * usdFactor + cad.monthly * cadFactor);
+        document.getElementById('total-annual').textContent  = fmt(usd.annual  * usdFactor + cad.annual  * cadFactor);
+    } else {
+        document.getElementById('total-balance').value        = '—';
+        document.getElementById('total-daily').textContent   = '—';
+        document.getElementById('total-monthly').textContent = '—';
+        document.getElementById('total-annual').textContent  = '—';
+    }
+
+    document.getElementById('disclaimer').hidden = !(usdBal > USD_TIER1 || cadBal > CAD_TIER1);
+
+    // Potential savings from converting the higher-rate balance to the cheaper currency.
+    // All math is done in the target currency to keep units consistent.
+    const savingsRow = document.getElementById('savings-row');
+    const higherIsUSD = usdRate > cadRate;
+    const higherBal = higherIsUSD ? usdBal : cadBal;
+    if (usdToCad && higherBal) {
+        let savingAnnual;
+        if (higherIsUSD) {
+            savingAnnual = usdBal * usdFactor * (usdRate - cadRate);
+            document.getElementById('savings-label').textContent = 'Est. savings if USD balance borrowed in CAD';
+        } else {
+            savingAnnual = cadBal * cadFactor * (cadRate - usdRate);
+            document.getElementById('savings-label').textContent = 'Est. savings if CAD balance borrowed in USD';
+        }
+        document.getElementById('savings-daily').textContent   = fmt(savingAnnual / 365);
+        document.getElementById('savings-monthly').textContent = fmt(savingAnnual / 12);
+        document.getElementById('savings-annual').textContent  = fmt(savingAnnual);
+        savingsRow.hidden = false;
+    } else {
+        savingsRow.hidden = true;
+    }
+}
+
+function saveInputs() {
+    localStorage.setItem('usd-balance', document.getElementById('usd-balance').value);
+    localStorage.setItem('cad-balance', document.getElementById('cad-balance').value);
+    localStorage.setItem('total-currency', document.getElementById('total-currency').value);
+}
+
+// Fetch live USD/CAD exchange rate, with fallback
+function setFxRate(rate) {
+    usdToCad = rate;
+    document.getElementById('fx-rate').textContent = '1 USD = ' + rate.toFixed(4) + ' CAD';
+    updateCalc();
+}
+
+fetch('https://open.er-api.com/v6/latest/USD')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { setFxRate(data.rates.CAD); })
+    .catch(function() {
+        fetch('https://api.frankfurter.app/latest?from=USD&to=CAD')
+            .then(function(r) { return r.json(); })
+            .then(function(data) { setFxRate(data.rates.CAD); })
+            .catch(function() {
+                document.getElementById('fx-rate').textContent = 'rate unavailable';
+            });
+    });
+
+// Restore saved values on load
+const savedUsd      = localStorage.getItem('usd-balance');
+const savedCad      = localStorage.getItem('cad-balance');
+const savedCurrency = localStorage.getItem('total-currency');
+if (savedUsd)      document.getElementById('usd-balance').value    = savedUsd;
+if (savedCad)      document.getElementById('cad-balance').value    = savedCad;
+if (savedCurrency) document.getElementById('total-currency').value = savedCurrency;
+
+document.getElementById('usd-balance').addEventListener('input', function() { formatInput(this); saveInputs(); updateCalc(); });
+document.getElementById('cad-balance').addEventListener('input', function() { formatInput(this); saveInputs(); updateCalc(); });
+document.getElementById('total-currency').addEventListener('change', function() { saveInputs(); updateCalc(); });
 </script>
 </body>
 </html>
