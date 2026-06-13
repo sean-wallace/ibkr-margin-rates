@@ -1,14 +1,14 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-import asciichartpy
 import requests
 from bs4 import BeautifulSoup
 
-# Configuration
 IBKR_MARGIN_URL = "https://www.interactivebrokers.ca/en/trading/margin-rates.php"
 HISTORY_FILE = Path(__file__).parent / "margin_rates_history.jsonl"
+TEMPLATE_FILE = Path(__file__).parent / "template.html"
+CHART_FILE = Path(__file__).parent / "docs" / "index.html"
 
 
 def scrape_margin_rates():
@@ -66,13 +66,8 @@ def load_previous_rates():
 
 def save_rates(rates):
     """Save current rates to file with timestamp."""
-    data = {
-        "timestamp": datetime.now().isoformat(),
-        "rates": rates,
-    }
-
+    data = {"timestamp": datetime.now().isoformat(), "rates": rates}
     try:
-        # Append to history (JSON Lines format)
         with open(HISTORY_FILE, "a") as f:
             f.write(json.dumps(data) + "\n")
     except OSError as e:
@@ -85,7 +80,6 @@ def prune_history():
         return
 
     try:
-        # Read all entries
         with open(HISTORY_FILE) as f:
             lines = f.readlines()
 
@@ -140,8 +134,8 @@ def check_for_changes(current_rates, previous_data):
     return False, "No changes detected"
 
 
-def generate_rate_chart():
-    """Generate ASCII chart of historical margin rates with interpolated missing days."""
+def generate_html_chart():
+    """Generate docs/index.html from the full rate history."""
     if not HISTORY_FILE.exists():
         return
 
@@ -149,122 +143,90 @@ def generate_rate_chart():
         with open(HISTORY_FILE) as f:
             lines = f.readlines()
 
-        if len(lines) < 2:
-            print("Not enough historical data to generate chart.")
+        if not lines:
             return
 
-        # Parse historical data
         raw_data = []
         for line in lines:
             try:
                 data = json.loads(line.strip())
                 rates = data["rates"]
                 timestamp = datetime.fromisoformat(data["timestamp"])
-
                 usd_rate = float(rates["USD"].rstrip("%")) if "USD" in rates else None
                 cad_rate = float(rates["CAD"].rstrip("%")) if "CAD" in rates else None
-
-                raw_data.append({"date": timestamp.date(), "usd": usd_rate, "cad": cad_rate})
+                raw_data.append({"date": timestamp.date().isoformat(), "usd": usd_rate, "cad": cad_rate})
             except (json.JSONDecodeError, KeyError, ValueError):
                 continue
 
         if not raw_data:
             return
 
-        # Fill in missing dates with interpolated values
-        start_date = raw_data[0]["date"]
-        end_date = raw_data[-1]["date"]
-        actual_dates = {entry["date"] for entry in raw_data}
-        date_map = {entry["date"]: entry for entry in raw_data}
+        labels = [d["date"] for d in raw_data]
+        usd_vals = [d["usd"] for d in raw_data]
+        cad_vals = [d["cad"] for d in raw_data]
+        usd_nums = [x for x in usd_vals if x is not None]
+        cad_nums = [x for x in cad_vals if x is not None]
 
-        # Build complete series with interpolated values
-        usd_series = []
-        cad_series = []
-        dates = []
-        last_usd = None
-        last_cad = None
-        current_date = start_date
+        rate_data = {
+            "labels": labels,
+            "usd": usd_vals,
+            "cad": cad_vals,
+            "meta": {
+                "date_range": f"{labels[0]} to {labels[-1]}",
+                "n_points": len(raw_data),
+                "usd_current": f"{usd_nums[-1]:.3f}",
+                "usd_min": f"{min(usd_nums):.3f}",
+                "usd_max": f"{max(usd_nums):.3f}",
+                "cad_current": f"{cad_nums[-1]:.3f}",
+                "cad_min": f"{min(cad_nums):.3f}",
+                "cad_max": f"{max(cad_nums):.3f}",
+                "last_updated": labels[-1],
+            },
+        }
 
-        while current_date <= end_date:
-            dates.append(current_date.strftime("%Y-%m-%d"))
+        template = TEMPLATE_FILE.read_text()
+        html = template.replace("__RATE_DATA__", json.dumps(rate_data, indent=2))
 
-            if current_date in actual_dates:
-                entry = date_map[current_date]
-                last_usd = entry["usd"]
-                last_cad = entry["cad"]
-
-            usd_series.append(last_usd)
-            cad_series.append(last_cad)
-            current_date += timedelta(days=1)
-
-        print("\nHistorical Margin Rates:")
-        print("=" * 60)
-
-        # Generate chart
-        has_usd = any(x is not None for x in usd_series)
-        has_cad = any(x is not None for x in cad_series)
-
-        if has_usd and has_cad:
-            print(f"\nMargin Rates ({dates[0]} to {dates[-1]}, {len(dates)} days):")
-
-            config = {"height": 10, "colors": [asciichartpy.blue, asciichartpy.red], "format": "{:8.3f}%"}
-            print(asciichartpy.plot([usd_series, cad_series], config))
-
-            usd_vals = [x for x in usd_series if x is not None]
-            cad_vals = [x for x in cad_series if x is not None]
-
-            print(f"  USD (blue):  Current: {usd_series[-1]}% | Min: {min(usd_vals)}% | Max: {max(usd_vals)}%")
-            print(f"  CAD (red):   Current: {cad_series[-1]}% | Min: {min(cad_vals)}% | Max: {max(cad_vals)}%")
-            print(f"  ({len(actual_dates)} actual data points, {len(dates) - len(actual_dates)} interpolated)")
+        CHART_FILE.parent.mkdir(exist_ok=True)
+        CHART_FILE.write_text(html)
+        print(f"Chart: {CHART_FILE}")
 
     except OSError as e:
         print(f"Error generating chart: {e}")
 
 
 def main():
-    # Scrape current rates
     current_rates = scrape_margin_rates()
 
     if not current_rates:
         print("Failed to retrieve margin rates. Exiting.")
         return
 
-    # Load previous rates
     previous_data = load_previous_rates()
-
-    # Check for changes
     has_changes, change_info = check_for_changes(current_rates, previous_data)
 
-    # Display results
     print("Current Rates:")
-    print("-" * 60)
+    print("-" * 40)
     for currency, rate in current_rates.items():
         print(f"  {currency}: {rate}")
     print()
 
     if has_changes:
-        print("⚠ CHANGES DETECTED:")
-        print("-" * 60)
+        print("CHANGES DETECTED:")
+        print("-" * 40)
         if isinstance(change_info, list):
             for change in change_info:
                 print(f"  {change}")
         else:
             print(f"  {change_info}")
+        print()
+        save_rates(current_rates)
+        prune_history()
+        generate_html_chart()
     else:
-        print("✓ No changes since last check")
-    if previous_data:
-        print(f"  Last checked: {previous_data.get('timestamp', 'Unknown')}")
-
-    print()
-
-    # Save current rates
-    save_rates(current_rates)
-
-    # Prune history to keep only one entry per day
-    prune_history()
-
-    # Generate ASCII chart of historical rates
-    generate_rate_chart()
+        print("No changes since last check")
+        if previous_data:
+            print(f"  Last checked: {previous_data.get('timestamp', 'Unknown')}")
 
 
 if __name__ == "__main__":
