@@ -8,6 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        [hidden] { display: none !important; }
         body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; color: #222; padding: 2rem 1rem; }
         .wrap { max-width: 860px; margin: 0 auto; }
         h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: .2rem; }
@@ -36,8 +37,32 @@
         .input-wrap input { border: none; outline: none; padding: .35rem .5rem; font-size: .9rem; width: 6.5rem; font-family: inherit; }
         .total-select { font-size: .8rem; border: 1px solid #ddd; border-radius: 4px; padding: .15rem .25rem; font-family: inherit; color: #555; background: #fff; cursor: pointer; }
         .fx-rate { font-size: .75rem; color: #aaa; }
-        .disclaimer { margin-top: 1rem; font-size: .8rem; color: #a07840; background: #fdf6ec; border: 1px solid #f0ddb8; border-radius: 6px; padding: .65rem .85rem; }
-        .disclaimer a { color: #a07840; }
+
+        /* Tier tooltip */
+        .rate-cell { position: relative; display: inline-block; cursor: default; }
+        .tier-tip {
+            display: none; position: absolute; top: calc(100% + 4px); left: 0;
+            min-width: 190px; background: #fff; border: 1px solid #e0e0e0;
+            border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.1);
+            padding: .5rem .75rem; z-index: 20; font-size: .78rem; color: #444;
+            white-space: nowrap; font-weight: normal; text-align: left;
+        }
+        .rate-cell:hover .tier-tip { display: block; }
+        .tier-tip-hd { font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: #999; margin-bottom: .35rem; }
+        .tier-tip-row { display: flex; justify-content: space-between; gap: 1.5rem; padding: .07rem 0; }
+        .tier-tip-row .tr { font-weight: 500; color: #222; }
+
+        /* Tier breakdown */
+        .breakdown-toggle { text-align: right; margin-top: .5rem; }
+        .breakdown-btn { border: none; background: none; color: #bbb; font-size: .75rem; font-family: inherit; cursor: pointer; padding: 0; }
+        .breakdown-btn:hover { color: #666; }
+        .breakdown-section { margin-top: .75rem; border-top: 1px solid #f0f0f0; padding-top: .75rem; display: flex; gap: 2rem; flex-wrap: wrap; }
+        .bd-block { flex: 1; min-width: 180px; }
+        .bd-lbl { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #999; margin-bottom: .3rem; }
+        .bd-tbl { width: 100%; border-collapse: collapse; font-size: .78rem; color: #555; }
+        .bd-tbl td { padding: .12rem .25rem; }
+        .bd-tbl td:not(:first-child) { text-align: right; }
+        .bd-tbl .bd-tot td { border-top: 1px solid #eee; font-weight: 600; color: #333; padding-top: .25rem; }
     </style>
 </head>
 <body>
@@ -75,7 +100,7 @@
             <tbody>
                 <tr>
                     <td>USD</td>
-                    <td id="usd-rate-note"></td>
+                    <td><span class="rate-cell" id="usd-rate-note"></span></td>
                     <td><div class="input-wrap"><span>$</span><input type="text" inputmode="numeric" id="usd-balance" placeholder="0"></div></td>
                     <td id="usd-daily">—</td>
                     <td id="usd-monthly">—</td>
@@ -83,7 +108,7 @@
                 </tr>
                 <tr>
                     <td>CAD</td>
-                    <td id="cad-rate-note"></td>
+                    <td><span class="rate-cell" id="cad-rate-note"></span></td>
                     <td><div class="input-wrap"><span>$</span><input type="text" inputmode="numeric" id="cad-balance" placeholder="0"></div></td>
                     <td id="cad-daily">—</td>
                     <td id="cad-monthly">—</td>
@@ -107,9 +132,13 @@
                 </tr>
             </tbody>
         </table>
-        <p class="disclaimer" id="disclaimer" hidden>
-            Balances above $100,000 USD or $130,000 CAD fall into higher tiers with lower rates — this calculator only applies the first-tier rate and will overstate your actual interest cost. <a href="https://www.interactivebrokers.ca/en/trading/margin-rates.php">See full rate schedule.</a>
-        </p>
+        <div class="breakdown-toggle">
+            <button class="breakdown-btn" id="breakdown-btn" onclick="toggleBreakdown()">▾ tier breakdown</button>
+        </div>
+        <div id="breakdown" class="breakdown-section" hidden>
+            <div class="bd-block" id="bd-usd"></div>
+            <div class="bd-block" id="bd-cad"></div>
+        </div>
     </div>
 
     <footer>Rates last changed <span id="last-updated"></span> &middot; <a href="https://www.interactivebrokers.ca/en/trading/margin-rates.php">Source: IBKR</a></footer>
@@ -216,7 +245,51 @@
     "cad_current": "3.678",
     "cad_min": "3.429",
     "cad_max": "4.050",
-    "last_updated": "2026-06-13"
+    "last_updated": "2026-06-13",
+    "usd_tiers": [
+      {
+        "threshold": 100000,
+        "rate": 5.12
+      },
+      {
+        "threshold": 1000000,
+        "rate": 4.62
+      },
+      {
+        "threshold": 50000000,
+        "rate": 4.37
+      },
+      {
+        "threshold": 250000000,
+        "rate": 4.12
+      },
+      {
+        "threshold": null,
+        "rate": 4.12
+      }
+    ],
+    "cad_tiers": [
+      {
+        "threshold": 130000,
+        "rate": 3.678
+      },
+      {
+        "threshold": 1300000,
+        "rate": 3.178
+      },
+      {
+        "threshold": 64000000,
+        "rate": 2.928
+      },
+      {
+        "threshold": 260000000,
+        "rate": 2.678
+      },
+      {
+        "threshold": null,
+        "rate": 2.678
+      }
+    ]
   }
 }
 </script>
@@ -244,8 +317,16 @@ document.getElementById('subtitle').textContent     = m.date_range + ' · ' + m.
 document.getElementById('usd-current').textContent  = m.usd_current + '%';
 document.getElementById('cad-current').textContent  = m.cad_current + '%';
 document.getElementById('last-updated').textContent = m.last_updated;
-document.getElementById('usd-rate-note').textContent = '@ ' + m.usd_current + '%';
-document.getElementById('cad-rate-note').textContent = '@ ' + m.cad_current + '%';
+(function() {
+    var usdT = m.usd_tiers || [{ threshold: null, rate: parseFloat(m.usd_current) }];
+    var cadT = m.cad_tiers || [{ threshold: null, rate: parseFloat(m.cad_current) }];
+    var usdNote = document.getElementById('usd-rate-note');
+    var cadNote = document.getElementById('cad-rate-note');
+    usdNote.textContent = '@ ' + m.usd_current + '%';
+    cadNote.textContent = '@ ' + m.cad_current + '%';
+    attachTierTooltip(usdNote, 'USD', usdT);
+    attachTierTooltip(cadNote, 'CAD', cadT);
+}());
 
 document.getElementById('usd-range').textContent = usd90min
     ? '90d: ' + usd90min + '–' + usd90max + '%'
@@ -334,8 +415,95 @@ new Chart(document.getElementById('chart'), {
 });
 
 // Calculator
-const USD_TIER1 = 100000;
-const CAD_TIER1 = 130000;
+// Bracket math (like income tax): each portion of balance charged at its tier's rate.
+function tieredInterest(balance, tiers) {
+    if (!tiers || !tiers.length) return 0;
+    var interest = 0, remaining = balance, prev = 0;
+    for (var i = 0; i < tiers.length; i++) {
+        var cap = tiers[i].threshold !== null ? tiers[i].threshold : Infinity;
+        var chunk = Math.min(remaining, cap - prev);
+        if (chunk <= 0) break;
+        interest += chunk * (tiers[i].rate / 100);
+        remaining -= chunk;
+        prev = cap;
+        if (remaining <= 0) break;
+    }
+    return interest; // annual
+}
+
+function fmtM(n) {
+    if (n >= 1e9) return '$' + (n / 1e9) + 'B';
+    if (n >= 1e6) return '$' + (n / 1e6 % 1 === 0 ? n / 1e6 : (n / 1e6).toFixed(1)) + 'M';
+    if (n >= 1e3) return '$' + Math.round(n / 1e3) + 'k';
+    return '$0';
+}
+
+function tierRange(lo, hi) {
+    return hi !== null ? (lo === 0 ? '$0' : fmtM(lo)) + ' – ' + fmtM(hi) : fmtM(lo) + '+';
+}
+
+function attachTierTooltip(el, currency, tiers) {
+    var tip = document.createElement('div');
+    tip.className = 'tier-tip';
+    var hd = document.createElement('div');
+    hd.className = 'tier-tip-hd';
+    hd.textContent = currency + ' rate schedule';
+    tip.appendChild(hd);
+    var prev = 0;
+    for (var i = 0; i < tiers.length; i++) {
+        var row = document.createElement('div');
+        row.className = 'tier-tip-row';
+        row.innerHTML = '<span>' + tierRange(prev, tiers[i].threshold) + '</span><span class="tr">' + tiers[i].rate.toFixed(3) + '%</span>';
+        tip.appendChild(row);
+        prev = tiers[i].threshold;
+    }
+    el.appendChild(tip);
+}
+
+function buildBreakdownBlock(elId, currency, balance, tiers) {
+    var el = document.getElementById(elId);
+    if (!balance) { el.innerHTML = ''; return; }
+    var rows = [], remaining = balance, prev = 0, totalInterest = 0;
+    for (var i = 0; i < tiers.length; i++) {
+        var cap = tiers[i].threshold !== null ? tiers[i].threshold : Infinity;
+        var chunk = Math.min(remaining, cap - prev);
+        if (chunk <= 0) break;
+        var interest = chunk * tiers[i].rate / 100;
+        totalInterest += interest;
+        rows.push({ range: tierRange(prev, tiers[i].threshold), rate: tiers[i].rate, chunk: chunk, interest: interest });
+        remaining -= chunk;
+        prev = tiers[i].threshold !== null ? tiers[i].threshold : Infinity;
+        if (remaining <= 0) break;
+    }
+    var html = '<div class="bd-lbl">' + currency + '</div><table class="bd-tbl">';
+    for (var j = 0; j < rows.length; j++) {
+        var r = rows[j];
+        html += '<tr><td>' + r.range + '</td><td>' + r.rate.toFixed(3) + '%</td><td>$' + Math.round(r.chunk).toLocaleString('en-CA') + '</td><td>' + fmt(r.interest) + '/yr</td></tr>';
+    }
+    if (rows.length > 1) {
+        html += '<tr class="bd-tot"><td colspan="2"></td><td>$' + Math.round(balance).toLocaleString('en-CA') + '</td><td>' + fmt(totalInterest) + '/yr</td></tr>';
+    }
+    html += '</table>';
+    el.innerHTML = html;
+}
+
+function toggleBreakdown() {
+    var bd = document.getElementById('breakdown');
+    var opening = bd.hidden;
+    bd.hidden = !opening;
+    document.getElementById('breakdown-btn').textContent = (opening ? '▴' : '▾') + ' tier breakdown';
+    if (opening) updateBreakdown();
+}
+
+function updateBreakdown() {
+    if (document.getElementById('breakdown').hidden) return;
+    var usdBal  = parseBalance(document.getElementById('usd-balance').value);
+    var cadBal  = parseBalance(document.getElementById('cad-balance').value);
+    var usdT = m.usd_tiers || [{ threshold: null, rate: parseFloat(m.usd_current) }];
+    var cadT = m.cad_tiers || [{ threshold: null, rate: parseFloat(m.cad_current) }];
+    buildBreakdownBlock('bd-usd', 'USD', usdBal, usdT);
+    buildBreakdownBlock('bd-cad', 'CAD', cadBal, cadT);
+}
 
 let usdToCad = null;
 
@@ -365,12 +533,15 @@ function formatInput(input) {
 function updateCalc() {
     const usdBal  = parseBalance(document.getElementById('usd-balance').value);
     const cadBal  = parseBalance(document.getElementById('cad-balance').value);
-    const usdRate = parseFloat(m.usd_current) / 100;
-    const cadRate = parseFloat(m.cad_current) / 100;
     const totalCurrency = document.getElementById('total-currency').value;
 
-    const usd = { daily: usdBal * usdRate / 365, monthly: usdBal * usdRate / 12, annual: usdBal * usdRate };
-    const cad = { daily: cadBal * cadRate / 365, monthly: cadBal * cadRate / 12, annual: cadBal * cadRate };
+    const usdTiers = m.usd_tiers || [{ threshold: null, rate: parseFloat(m.usd_current) }];
+    const cadTiers = m.cad_tiers || [{ threshold: null, rate: parseFloat(m.cad_current) }];
+
+    const usdAnnual = tieredInterest(usdBal, usdTiers);
+    const cadAnnual = tieredInterest(cadBal, cadTiers);
+    const usd = { daily: usdAnnual / 365, monthly: usdAnnual / 12, annual: usdAnnual };
+    const cad = { daily: cadAnnual / 365, monthly: cadAnnual / 12, annual: cadAnnual };
 
     document.getElementById('usd-daily').textContent   = usdBal ? fmt(usd.daily)   : '—';
     document.getElementById('usd-monthly').textContent = usdBal ? fmt(usd.monthly) : '—';
@@ -385,40 +556,47 @@ function updateCalc() {
     const cadFactor = totalCurrency === 'CAD' ? 1 : 1 / usdToCad;
 
     if (hasAny && usdToCad) {
-        document.getElementById('total-balance').value        = Math.round(usdBal * usdFactor + cadBal * cadFactor).toLocaleString('en-CA');
+        document.getElementById('total-balance').value       = Math.round(usdBal * usdFactor + cadBal * cadFactor).toLocaleString('en-CA');
         document.getElementById('total-daily').textContent   = fmt(usd.daily   * usdFactor + cad.daily   * cadFactor);
         document.getElementById('total-monthly').textContent = fmt(usd.monthly * usdFactor + cad.monthly * cadFactor);
         document.getElementById('total-annual').textContent  = fmt(usd.annual  * usdFactor + cad.annual  * cadFactor);
     } else {
-        document.getElementById('total-balance').value        = '—';
+        document.getElementById('total-balance').value       = '—';
         document.getElementById('total-daily').textContent   = '—';
         document.getElementById('total-monthly').textContent = '—';
         document.getElementById('total-annual').textContent  = '—';
     }
 
-    document.getElementById('disclaimer').hidden = !(usdBal > USD_TIER1 || cadBal > CAD_TIER1);
-
     // Potential savings from converting the higher-rate balance to the cheaper currency.
-    // All math is done in the target currency to keep units consistent.
+    // Compute interest in both scenarios and convert to target currency to keep units consistent.
     const savingsRow = document.getElementById('savings-row');
-    const higherIsUSD = usdRate > cadRate;
+    const higherIsUSD = parseFloat(m.usd_current) > parseFloat(m.cad_current);
     const higherBal = higherIsUSD ? usdBal : cadBal;
     if (usdToCad && higherBal) {
         let savingAnnual;
         if (higherIsUSD) {
-            savingAnnual = usdBal * usdFactor * (usdRate - cadRate);
+            const currentCost     = tieredInterest(usdBal, usdTiers) * usdFactor;
+            const hypotheticalCost = tieredInterest(usdBal * usdToCad, cadTiers) * cadFactor;
+            savingAnnual = currentCost - hypotheticalCost;
             document.getElementById('savings-label').textContent = 'Est. savings if USD balance borrowed in CAD';
         } else {
-            savingAnnual = cadBal * cadFactor * (cadRate - usdRate);
+            const currentCost     = tieredInterest(cadBal, cadTiers) * cadFactor;
+            const hypotheticalCost = tieredInterest(cadBal / usdToCad, usdTiers) * usdFactor;
+            savingAnnual = currentCost - hypotheticalCost;
             document.getElementById('savings-label').textContent = 'Est. savings if CAD balance borrowed in USD';
         }
-        document.getElementById('savings-daily').textContent   = fmt(savingAnnual / 365);
-        document.getElementById('savings-monthly').textContent = fmt(savingAnnual / 12);
-        document.getElementById('savings-annual').textContent  = fmt(savingAnnual);
-        savingsRow.hidden = false;
+        if (savingAnnual > 0) {
+            document.getElementById('savings-daily').textContent   = fmt(savingAnnual / 365);
+            document.getElementById('savings-monthly').textContent = fmt(savingAnnual / 12);
+            document.getElementById('savings-annual').textContent  = fmt(savingAnnual);
+            savingsRow.hidden = false;
+        } else {
+            savingsRow.hidden = true;
+        }
     } else {
         savingsRow.hidden = true;
     }
+    updateBreakdown();
 }
 
 function saveInputs() {

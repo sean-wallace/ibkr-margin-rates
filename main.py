@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -11,14 +12,53 @@ TEMPLATE_FILE = Path(__file__).parent / "template.html"
 CHART_FILE = Path(__file__).parent / "docs" / "index.html"
 
 
+def _parse_tier_text(tier_text):
+    """Return (lower_bound, upper_bound) from text like '0 ≤ 100,000' or '> 250,000,000'."""
+    clean = tier_text.replace(",", "").strip()
+    if clean.startswith(">"):
+        nums = re.findall(r"\d+", clean)
+        return (int(nums[0]), None) if nums else (None, None)
+    nums = re.findall(r"\d+", clean)
+    if len(nums) >= 2:
+        return int(nums[0]), int(nums[1])
+    return None, None
+
+
+def _parse_rate_text(rate_text):
+    """Return rate string like '5.120%' from '5.120%(BM +1.5%)'."""
+    return rate_text.split("(")[0].strip()
+
+
+def _extract_tier1_rate(rate_value):
+    """Extract first-tier rate as float from either old (str) or new (list) format."""
+    if isinstance(rate_value, str):
+        return float(rate_value.rstrip("%"))
+    if isinstance(rate_value, list) and rate_value:
+        return float(rate_value[0]["rate"].rstrip("%"))
+    return None
+
+
+def _tiers_for_meta(rate_value):
+    """Convert rate value to [{threshold, rate (float)}] list for the template."""
+    if isinstance(rate_value, str):
+        return [{"threshold": None, "rate": float(rate_value.rstrip("%"))}]
+    if isinstance(rate_value, list):
+        return [{"threshold": t["threshold"], "rate": float(t["rate"].rstrip("%"))} for t in rate_value]
+    return []
+
+
 def scrape_margin_rates():
-    """Scrape current USD and CAD margin rates from Interactive Brokers."""
+    """Scrape current USD and CAD margin rates (all tiers) from Interactive Brokers."""
     try:
         response = requests.get(IBKR_MARGIN_URL, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
 
         rates = {}
+        current_currency = None
+        current_tiers = []
+        expected_lower = None
+
         table = soup.find("table")
         if not table:
             return None
@@ -28,18 +68,52 @@ def scrape_margin_rates():
             if len(cells) < 3:
                 continue
 
-            # Look for rows with: Currency, tier starting with 0, and a percentage rate
-            currency = cells[0]
-            tier = cells[1]
+            currency, tier_text, rate_text = cells[0], cells[1], cells[2]
 
-            if currency in ["USD", "CAD"] and tier.startswith("0") and "≤" in tier:
-                # Find the rate (has % symbol)
-                for cell in cells:
-                    if "%" in cell and any(char.isdigit() for char in cell):
-                        # Extract the rate, removing parenthetical info
-                        rate = cell.split("(")[0].strip()
-                        rates[currency] = rate
-                        break
+            if currency in ("USD", "CAD"):
+                # New named currency block — save whatever we have and start fresh
+                if current_currency and current_tiers:
+                    rates[current_currency] = current_tiers
+                current_currency = currency
+                current_tiers = []
+                expected_lower = 0
+            elif currency != "":
+                # Some other named currency — end current block
+                if current_currency and current_tiers:
+                    rates[current_currency] = current_tiers
+                current_currency = None
+                current_tiers = []
+                expected_lower = None
+                continue
+            elif current_currency is None:
+                continue  # blank currency row, not currently collecting
+
+            lower, upper = _parse_tier_text(tier_text)
+            if lower is None or lower != expected_lower:
+                # Sequence broken — this row belongs to a different product in the table
+                if current_currency and current_tiers:
+                    rates[current_currency] = current_tiers
+                current_currency = None
+                current_tiers = []
+                expected_lower = None
+                continue
+
+            rate = _parse_rate_text(rate_text)
+            if "%" not in rate:
+                continue
+
+            current_tiers.append({"threshold": upper, "rate": rate})
+            expected_lower = upper  # None once the last (open-ended) tier is added
+
+            if upper is None:
+                # Last tier — finalize this currency
+                rates[current_currency] = current_tiers
+                current_currency = None
+                current_tiers = []
+                expected_lower = None
+
+        if current_currency and current_tiers:
+            rates[current_currency] = current_tiers
 
         return rates if rates else None
 
@@ -123,15 +197,16 @@ def check_for_changes(current_rates, previous_data):
     changes = []
 
     for currency in current_rates:
-        if currency not in previous_rates:
-            changes.append(f"{currency}: NEW (now {current_rates[currency]})")
-        elif current_rates[currency] != previous_rates[currency]:
-            changes.append(f"{currency}: {previous_rates[currency]} → {current_rates[currency]}")
+        current_tier1 = _extract_tier1_rate(current_rates[currency])
+        previous_rate = previous_rates.get(currency)
+        if previous_rate is None:
+            changes.append(f"{currency}: NEW (now {current_tier1}%)")
+        else:
+            previous_tier1 = _extract_tier1_rate(previous_rate)
+            if current_tier1 != previous_tier1:
+                changes.append(f"{currency}: {previous_tier1}% → {current_tier1}%")
 
-    if changes:
-        return True, changes
-
-    return False, "No changes detected"
+    return (True, changes) if changes else (False, "No changes detected")
 
 
 def generate_html_chart():
@@ -152,9 +227,16 @@ def generate_html_chart():
                 data = json.loads(line.strip())
                 rates = data["rates"]
                 timestamp = datetime.fromisoformat(data["timestamp"])
-                usd_rate = float(rates["USD"].rstrip("%")) if "USD" in rates else None
-                cad_rate = float(rates["CAD"].rstrip("%")) if "CAD" in rates else None
-                raw_data.append({"date": timestamp.date().isoformat(), "usd": usd_rate, "cad": cad_rate})
+                usd_rate = _extract_tier1_rate(rates.get("USD")) if "USD" in rates else None
+                cad_rate = _extract_tier1_rate(rates.get("CAD")) if "CAD" in rates else None
+                raw_data.append(
+                    {
+                        "date": timestamp.date().isoformat(),
+                        "usd": usd_rate,
+                        "cad": cad_rate,
+                        "rates": rates,
+                    }
+                )
             except (json.JSONDecodeError, KeyError, ValueError):
                 continue
 
@@ -167,6 +249,7 @@ def generate_html_chart():
         usd_nums = [x for x in usd_vals if x is not None]
         cad_nums = [x for x in cad_vals if x is not None]
 
+        last_rates = raw_data[-1]["rates"]
         rate_data = {
             "labels": labels,
             "usd": usd_vals,
@@ -181,6 +264,8 @@ def generate_html_chart():
                 "cad_min": f"{min(cad_nums):.3f}",
                 "cad_max": f"{max(cad_nums):.3f}",
                 "last_updated": labels[-1],
+                "usd_tiers": _tiers_for_meta(last_rates.get("USD", [])),
+                "cad_tiers": _tiers_for_meta(last_rates.get("CAD", [])),
             },
         }
 
@@ -207,8 +292,10 @@ def main():
 
     print("Current Rates:")
     print("-" * 40)
-    for currency, rate in current_rates.items():
-        print(f"  {currency}: {rate}")
+    for currency, rate_value in current_rates.items():
+        tier1 = _extract_tier1_rate(rate_value)
+        n = len(rate_value) if isinstance(rate_value, list) else 1
+        print(f"  {currency}: {tier1}% ({n} tier{'s' if n != 1 else ''})")
     print()
 
     if has_changes:
