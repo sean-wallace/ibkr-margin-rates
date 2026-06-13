@@ -1,5 +1,7 @@
 # margin-rates
 
+**[sean-wallace.github.io/ibkr-margin-rates](https://sean-wallace.github.io/ibkr-margin-rates/)**
+
 Tracks USD and CAD margin rates on Interactive Brokers over time.
 
 Scrapes the IBKR margin rates page, saves new observations to `margin_rates_history.jsonl`, and regenerates `docs/index.html` when rates change. A GitHub Actions workflow runs this daily and commits any changes, so the chart stays current without manual intervention.
