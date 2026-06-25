@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IBKR Margin Rates</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js-basic-dist-min@2"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         [hidden] { display: none !important; }
@@ -63,6 +62,11 @@
         .bd-tbl td { padding: .12rem .25rem; }
         .bd-tbl td:not(:first-child) { text-align: right; }
         .bd-tbl .bd-tot td { border-top: 1px solid #eee; font-weight: 600; color: #333; padding-top: .25rem; }
+        #chart { height: 300px; }
+        @media (max-width: 540px) {
+            .calc-table th:nth-child(4), .calc-table td:nth-child(4) { display: none; }
+            .input-wrap input { width: 5rem; }
+        }
     </style>
 </head>
 <body>
@@ -82,10 +86,11 @@
         </div>
     </div>
     <div class="card">
-        <canvas id="chart"></canvas>
+        <div id="chart"></div>
     </div>
 
     <div class="card">
+        <div style="overflow-x:auto">
         <table class="calc-table">
             <thead>
                 <tr>
@@ -123,15 +128,14 @@
                     <td id="total-annual">—</td>
                 </tr>
                 <tr class="savings-row" id="savings-row" hidden>
-                    <td id="savings-label" style="color:#777;font-style:italic"></td>
-                    <td></td>
-                    <td></td>
+                    <td id="savings-label" colspan="3" style="color:#777;font-style:italic"></td>
                     <td id="savings-daily"></td>
                     <td id="savings-monthly"></td>
                     <td id="savings-annual"></td>
                 </tr>
             </tbody>
         </table>
+        </div>
         <div class="breakdown-toggle">
             <button class="breakdown-btn" id="breakdown-btn" onclick="toggleBreakdown()">▾ tier breakdown</button>
         </div>
@@ -189,83 +193,40 @@ document.getElementById('cad-range').textContent = cad90min
     ? '90d: ' + cad90min + '–' + cad90max + '%'
     : 'Min ' + m.cad_min + '% – Max ' + m.cad_max + '%';
 
-new Chart(document.getElementById('chart'), {
-    type: 'line',
-    data: {
-        labels: d.labels,
-        datasets: [
-            {
-                label: 'USD',
-                data: d.usd,
-                borderColor: '#4a7fa5',
-                backgroundColor: 'rgba(74,127,165,.1)',
-                borderWidth: 2,
-                tension: .2,
-                fill: true,
-                pointRadius: 4,
-                pointHoverRadius: 6,
-            },
-            {
-                label: 'CAD',
-                data: d.cad,
-                borderColor: '#b05040',
-                backgroundColor: 'rgba(176,80,64,.1)',
-                borderWidth: 2,
-                tension: .2,
-                fill: true,
-                pointRadius: 4,
-                pointHoverRadius: 6,
-            },
-        ],
+Plotly.newPlot('chart', [
+    {
+        x: d.labels, y: d.usd, name: 'USD', type: 'scatter', mode: 'lines+markers',
+        line: { color: '#4a7fa5', width: 2, shape: 'spline', smoothing: 0.5 },
+        marker: { size: 4, color: '#4a7fa5' },
+        hovertemplate: 'USD: %{y:.3f}%<extra></extra>',
     },
-    options: {
-        responsive: true,
-        interaction: { mode: 'index', intersect: false },
-        scales: {
-            x: {
-                type: 'time',
-                time: {
-                    unit: 'month',
-                    tooltipFormat: 'MMM d, yyyy',
-                },
-                grid: {
-                    display: true,
-                    color: function(ctx) {
-                        return new Date(ctx.tick.value).getMonth() === 0
-                            ? 'rgba(0,0,0,.18)'
-                            : 'rgba(0,0,0,.06)';
-                    },
-                    lineWidth: function(ctx) {
-                        return new Date(ctx.tick.value).getMonth() === 0 ? 1.5 : 1;
-                    },
-                    borderDash: [3, 3],
-                },
-                ticks: {
-                    maxTicksLimit: 20,
-                    callback: function(value, index) {
-                        const date = new Date(value);
-                        const month = date.toLocaleString('en', { month: 'short' });
-                        if (date.getMonth() === 0 || index === 0) {
-                            return [month, String(date.getFullYear())];
-                        }
-                        return month;
-                    },
-                },
-            },
-            y: {
-                ticks: { callback: function(v) { return v.toFixed(2) + '%'; } },
-                grid: { color: 'rgba(0,0,0,.04)' },
-            },
-        },
-        plugins: {
-            tooltip: {
-                callbacks: {
-                    label: function(ctx) { return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(3) + '%'; },
-                },
-            },
-            legend: { position: 'top', align: 'end' },
-        },
+    {
+        x: d.labels, y: d.cad, name: 'CAD', type: 'scatter', mode: 'lines+markers',
+        line: { color: '#b05040', width: 2, shape: 'spline', smoothing: 0.5 },
+        marker: { size: 4, color: '#b05040' },
+        hovertemplate: 'CAD: %{y:.3f}%<extra></extra>',
     },
+], {
+    margin: { t: 10, r: 10, b: 40, l: 50 },
+    paper_bgcolor: 'transparent',
+    plot_bgcolor: 'transparent',
+    xaxis: {
+        type: 'date',
+        gridcolor: 'rgba(0,0,0,.06)',
+        tickformat: '%b %Y',
+        tickfont: { size: 11 },
+    },
+    yaxis: {
+        ticksuffix: '%',
+        tickformat: '.2f',
+        gridcolor: 'rgba(0,0,0,.04)',
+        zeroline: false,
+    },
+    legend: { xanchor: 'right', x: 1, y: 1.02, yanchor: 'bottom', orientation: 'h' },
+    hovermode: 'x unified',
+}, {
+    responsive: true,
+    displayModeBar: false,
 });
 
 // Calculator
